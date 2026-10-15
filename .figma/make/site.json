@@ -1,0 +1,10 @@
+{
+  "description": "Connect with global students and professionals to collaborate on IT projects and discover internship opportunities tailored to your skills.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
