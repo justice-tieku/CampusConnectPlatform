@@ -11,6 +11,8 @@ type View =
   | "dashboard"
   | "projects"
   | "internships"
+  | "mentors"
+  | "courses"
   | "profile"
   | "notifications";
 type AccountType = "Student" | "Staff" | "Admin";
@@ -38,6 +40,85 @@ type Account = {
 
 const STORAGE_KEY = "campus-connect-account";
 const SESSION_KEY = "campus-connect-session";
+const PROJECTS_KEY = "campus-connect-projects";
+const NOTIFICATIONS_KEY = "campus-connect-notifications";
+
+type JoinRequest = {
+  id: string;
+  applicantEmail: string;
+  applicantName: string;
+  message: string;
+  status: "pending" | "accepted" | "declined";
+};
+
+type Project = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  techStack: string[];
+  roles: string[];
+  teamSize: number;
+  status: "Open" | "In progress" | "Completed";
+  ownerEmail: string;
+  ownerName: string;
+  members: string[];
+  requests: JoinRequest[];
+};
+
+type Notice = {
+  id: string;
+  recipient: string;
+  title: string;
+  detail: string;
+  createdAt: string;
+  read: boolean;
+};
+
+const STARTER_PROJECTS: Project[] = [
+  {
+    id: "study-sync",
+    title: "StudySync",
+    description: "A collaborative study planner that helps university teams share goals, notes, and accountability streaks.",
+    category: "EdTech",
+    techStack: ["React", "TypeScript", "Figma"],
+    roles: ["Frontend developer", "Product designer"],
+    teamSize: 5,
+    status: "Open",
+    ownerEmail: "maya@campusconnect.demo",
+    ownerName: "Maya Chen",
+    members: ["Maya Chen", "Samuel Okoro"],
+    requests: [],
+  },
+  {
+    id: "green-route",
+    title: "GreenRoute",
+    description: "A mobile-first tool for finding lower-emission routes and tracking sustainable travel habits.",
+    category: "Climate",
+    techStack: ["Flutter", "Python", "Machine Learning"],
+    roles: ["Mobile developer", "Data scientist"],
+    teamSize: 4,
+    status: "Open",
+    ownerEmail: "leo@campusconnect.demo",
+    ownerName: "Leo Martins",
+    members: ["Leo Martins"],
+    requests: [],
+  },
+  {
+    id: "access-map",
+    title: "AccessMap",
+    description: "Community-powered accessibility reviews for lecture halls, libraries, and public campus spaces.",
+    category: "Social impact",
+    techStack: ["React", "Node.js", "Java"],
+    roles: ["Backend developer"],
+    teamSize: 6,
+    status: "In progress",
+    ownerEmail: "amina@campusconnect.demo",
+    ownerName: "Amina Yusuf",
+    members: ["Amina Yusuf", "Chris Lee", "Nora James"],
+    requests: [],
+  },
+];
 const HERO_IMAGE =
   "https://images.unsplash.com/photo-1758270705317-3ef6142d306f?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=85&w=1400";
 
@@ -49,7 +130,7 @@ async function hashPassword(password: string) {
 
 function routeFromHash(): View {
   const route = window.location.hash.slice(1).split("?")[0] as View;
-  const routes: View[] = ["signup", "login", "verify", "forgot", "reset", "onboarding", "dashboard", "projects", "internships", "profile", "notifications"];
+  const routes: View[] = ["signup", "login", "verify", "forgot", "reset", "onboarding", "dashboard", "projects", "internships", "mentors", "courses", "profile", "notifications"];
   return routes.includes(route) ? route : "home";
 }
 
@@ -708,12 +789,24 @@ function AppShell({
   navigate,
   onLogout,
   onSave,
+  projects,
+  notices,
+  onCreateProject,
+  onJoinProject,
+  onRequestDecision,
+  onReadNotices,
 }: {
   account: Account;
   view: View;
   navigate: (view: View) => void;
   onLogout: () => void;
   onSave: (profile: Partial<Account>) => void;
+  projects: Project[];
+  notices: Notice[];
+  onCreateProject: (project: Project) => void;
+  onJoinProject: (projectId: string, message: string) => void;
+  onRequestDecision: (projectId: string, requestId: string, decision: "accepted" | "declined") => void;
+  onReadNotices: () => void;
 }) {
   const firstName = account.name.split(" ")[0];
   const initials = account.name.split(" ").map((part) => part[0]).slice(0, 2).join("");
@@ -721,6 +814,8 @@ function AppShell({
     { label: "Dashboard", view: "dashboard" },
     { label: "Projects", view: "projects" },
     { label: "Internships", view: "internships" },
+    { label: "Mentors", view: "mentors" },
+    { label: "Courses", view: "courses" },
     { label: "Profile", view: "profile" },
     { label: "Notifications", view: "notifications" },
   ];
@@ -731,26 +826,201 @@ function AppShell({
     <div className="app-shell">
       <aside className="app-sidebar">
         <Logo onClick={() => navigate("dashboard")} />
-        <nav>{nav.map((item, index) => <button className={view === item.view && index < 5 ? "active" : ""} key={`${item.label}-${index}`} onClick={() => navigate(item.view)} type="button"><span>{item.label.slice(0, 1)}</span>{item.label}</button>)}</nav>
+        <nav>{nav.map((item, index) => <button className={view === item.view ? "active" : ""} key={`${item.label}-${index}`} onClick={() => navigate(item.view)} type="button"><span>{item.label.slice(0, 1)}</span>{item.label}</button>)}</nav>
         <button className="logout-button" onClick={onLogout} type="button"><Icon size={17}><path d="M10 17l5-5-5-5M15 12H3M15 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" /></Icon>Log out</button>
       </aside>
       <div className="app-content">
         <header className="app-topbar"><div><span className="status-dot" />Campus community online</div><button onClick={() => navigate("profile")} type="button"><span>{initials}</span><div><strong>{account.name}</strong><small>{account.accountType}</small></div></button></header>
         <main>
           {account.onboardingSkipped && !account.onboardingComplete && <div className="profile-reminder"><span>Complete your profile to improve project matches.</span><button onClick={() => navigate("onboarding")} type="button">Finish setup</button></div>}
-          {view === "profile" ? <Profile account={account} onSave={onSave} /> : view === "dashboard" ? (
+          {view === "profile" ? <Profile account={account} onSave={onSave} /> : view === "projects" ? (
+            <ProjectsHub account={account} onCreate={onCreateProject} onDecision={onRequestDecision} onJoin={onJoinProject} projects={projects} />
+          ) : view === "internships" ? <InternshipsPage canPost={account.accountType !== "Student"} /> : view === "mentors" ? <MentorsPage /> : view === "courses" ? <CoursesPage /> : view === "notifications" ? (
+            <NotificationsPage notices={notices} onRead={onReadNotices} />
+          ) : view === "dashboard" ? (
             <>
               <div className="app-heading"><span className="form-kicker">YOUR CAMPUS</span><h1>Good to see you, <em>{firstName}.</em></h1><p>Here’s what’s happening in your builder community.</p></div>
               <div className="quick-grid"><article><span>OPEN PROJECTS</span><strong>0</strong><p>Find a team and start building.</p><button onClick={() => navigate("projects")} type="button">Explore projects <ArrowIcon /></button></article><article><span>INTERNSHIP MATCHES</span><strong>0</strong><p>Opportunities matching your profile.</p><button onClick={() => navigate("internships")} type="button">Browse internships <ArrowIcon /></button></article><article><span>NOTIFICATIONS</span><strong>0</strong><p>You’re all caught up for now.</p><button onClick={() => navigate("notifications")} type="button">View activity <ArrowIcon /></button></article></div>
               <section className="empty-feed"><span className="empty-mark">CC</span><h2>Your next collaboration starts here</h2><p>Projects and updates from your community will appear here.</p><button className="button button-dark" onClick={() => navigate("projects")} type="button">Discover projects</button></section>
             </>
-          ) : (
-            <PlaceholderPage view={view} />
-          )}
+          ) : <PlaceholderPage view={view} />}
         </main>
       </div>
     </div>
   );
+}
+
+function ProjectsHub({
+  account,
+  projects,
+  onCreate,
+  onJoin,
+  onDecision,
+}: {
+  account: Account;
+  projects: Project[];
+  onCreate: (project: Project) => void;
+  onJoin: (projectId: string, message: string) => void;
+  onDecision: (projectId: string, requestId: string, decision: "accepted" | "declined") => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("All");
+  const [category, setCategory] = useState("All");
+  const [skill, setSkill] = useState("All");
+  const [showCreate, setShowCreate] = useState(false);
+  const [joinProject, setJoinProject] = useState<Project | null>(null);
+  const [message, setMessage] = useState("");
+  const [created, setCreated] = useState({ title: "", description: "", category: "EdTech", tech: "", roles: "", teamSize: "4", status: "Open" as Project["status"] });
+  const categories = ["All", ...Array.from(new Set(projects.map((project) => project.category)))];
+  const skills = ["All", ...Array.from(new Set(projects.flatMap((project) => project.techStack)))];
+  const filtered = projects.filter((project) => {
+    const term = search.toLowerCase();
+    return (!term || `${project.title} ${project.description}`.toLowerCase().includes(term))
+      && (status === "All" || project.status === status)
+      && (category === "All" || project.category === category)
+      && (skill === "All" || project.techStack.includes(skill));
+  });
+  const submitProject = (event: FormEvent) => {
+    event.preventDefault();
+    const techStack = created.tech.split(",").map((item) => item.trim()).filter(Boolean);
+    const roles = created.roles.split(",").map((item) => item.trim()).filter(Boolean);
+    if (!created.title.trim() || !created.description.trim() || !techStack.length || !roles.length) return;
+    onCreate({
+      id: crypto.randomUUID(),
+      title: created.title.trim(),
+      description: created.description.trim(),
+      category: created.category,
+      techStack,
+      roles,
+      teamSize: Number(created.teamSize),
+      status: created.status,
+      ownerEmail: account.email,
+      ownerName: account.name,
+      members: [account.name],
+      requests: [],
+    });
+    setCreated({ title: "", description: "", category: "EdTech", tech: "", roles: "", teamSize: "4", status: "Open" });
+    setShowCreate(false);
+  };
+  const submitJoin = (event: FormEvent) => {
+    event.preventDefault();
+    if (!joinProject || !message.trim()) return;
+    onJoin(joinProject.id, message.trim());
+    setJoinProject(null);
+    setMessage("");
+  };
+
+  return (
+    <div className="projects-page">
+      <div className="marketplace-heading">
+        <div><span className="form-kicker">BUILD TOGETHER</span><h1>Discover projects</h1><p>Find an idea that matches your skills—or start one of your own.</p></div>
+        <button className="button button-coral" onClick={() => setShowCreate((shown) => !shown)} type="button">{showCreate ? "Close form" : "Post a project"}</button>
+      </div>
+
+      {showCreate && (
+        <form className="create-panel" onSubmit={submitProject}>
+          <div className="panel-title"><div><span>NEW PROJECT</span><h2>Share your idea</h2></div><p>Give future teammates enough detail to know where they can contribute.</p></div>
+          <div className="field-row"><Field label="Project title"><input onChange={(e) => setCreated({ ...created, title: e.target.value })} placeholder="e.g. Campus Food Rescue" required value={created.title} /></Field><label className="field"><span>Category</span><select onChange={(e) => setCreated({ ...created, category: e.target.value })} value={created.category}><option>EdTech</option><option>Climate</option><option>Health</option><option>Social impact</option><option>Developer tools</option></select></label></div>
+          <Field label="Description"><textarea onChange={(e) => setCreated({ ...created, description: e.target.value })} placeholder="What are you building, and why does it matter?" required value={created.description} /></Field>
+          <div className="field-row"><Field label="Tech stack tags"><input onChange={(e) => setCreated({ ...created, tech: e.target.value })} placeholder="React, Python, Figma" required value={created.tech} /></Field><Field label="Roles needed"><input onChange={(e) => setCreated({ ...created, roles: e.target.value })} placeholder="Designer, Backend developer" required value={created.roles} /></Field></div>
+          <div className="field-row"><label className="field"><span>Team size</span><select onChange={(e) => setCreated({ ...created, teamSize: e.target.value })} value={created.teamSize}>{[2,3,4,5,6,8,10].map((size) => <option key={size}>{size}</option>)}</select></label><label className="field"><span>Status</span><select onChange={(e) => setCreated({ ...created, status: e.target.value as Project["status"] })} value={created.status}><option>Open</option><option>In progress</option><option>Completed</option></select></label></div>
+          <button className="button button-dark" type="submit">Publish project <ArrowIcon /></button>
+        </form>
+      )}
+
+      <div className="project-filters">
+        <label className="search-field"><Icon size={17}><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" /><path d="m16 16 4 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></Icon><input onChange={(e) => setSearch(e.target.value)} placeholder="Search projects" value={search} /></label>
+        <select aria-label="Filter by status" onChange={(e) => setStatus(e.target.value)} value={status}><option>All</option><option>Open</option><option>In progress</option><option>Completed</option></select>
+        <select aria-label="Filter by category" onChange={(e) => setCategory(e.target.value)} value={category}>{categories.map((item) => <option key={item}>{item}</option>)}</select>
+        <select aria-label="Filter by skill" onChange={(e) => setSkill(e.target.value)} value={skill}>{skills.map((item) => <option key={item}>{item}</option>)}</select>
+      </div>
+
+      <div className="results-meta"><span>{filtered.length} projects</span><span>Updated just now</span></div>
+      <div className="project-grid">
+        {filtered.map((project) => {
+          const matched = project.techStack.filter((item) => account.techStack.some((skillName) => skillName.toLowerCase() === item.toLowerCase()));
+          const ownProject = project.ownerEmail === account.email;
+          const existingRequest = project.requests.find((request) => request.applicantEmail === account.email);
+          return (
+            <article className="project-listing" key={project.id}>
+              <div className="listing-top"><span className={`status-badge ${project.status.toLowerCase().replace(" ", "-")}`}>{project.status}</span><span>{project.category}</span></div>
+              <h2>{project.title}</h2>
+              <p>{project.description}</p>
+              {matched.length > 0 && <div className="skill-match"><Icon size={14}><path d="m12 3 1.2 3.7a2 2 0 0 0 1.3 1.3l3.7 1.2-3.7 1.3a2 2 0 0 0-1.3 1.2L12 15.5l-1.2-3.8a2 2 0 0 0-1.3-1.2L5.7 9.2 9.5 8a2 2 0 0 0 1.3-1.3L12 3Z" fill="currentColor" /></Icon>Matches {matched.join(" + ")}</div>}
+              <div className="listing-tags">{project.techStack.map((item) => <span key={item}>{item}</span>)}</div>
+              <div className="roles-needed"><small>LOOKING FOR</small><p>{project.roles.join(" · ")}</p></div>
+              <div className="listing-footer"><div><strong>{project.ownerName}</strong><small>{project.members.length} of {project.teamSize} members</small></div>{ownProject ? <span className="owner-label">Your project</span> : existingRequest ? <span className={`request-state ${existingRequest.status}`}>{existingRequest.status}</span> : <button disabled={project.status !== "Open"} onClick={() => setJoinProject(project)} type="button">Request to join</button>}</div>
+              {ownProject && project.requests.length > 0 && <div className="request-list"><strong>JOIN REQUESTS</strong>{project.requests.map((request) => <div key={request.id}><span>{request.applicantName}<small>{request.message}</small></span>{request.status === "pending" ? <span><button onClick={() => onDecision(project.id, request.id, "declined")} type="button">Decline</button><button onClick={() => onDecision(project.id, request.id, "accepted")} type="button">Accept</button></span> : <b>{request.status}</b>}</div>)}</div>}
+            </article>
+          );
+        })}
+      </div>
+      {joinProject && <div className="dialog-backdrop" onMouseDown={() => setJoinProject(null)}><form className="join-dialog" onMouseDown={(e) => e.stopPropagation()} onSubmit={submitJoin}><span className="form-kicker">JOIN {joinProject.title.toUpperCase()}</span><h2>Tell the team why you’d like to help.</h2><Field label="Short message"><textarea autoFocus onChange={(e) => setMessage(e.target.value)} placeholder="Introduce yourself and share how your skills could contribute..." required value={message} /></Field><div><button className="text-button" onClick={() => setJoinProject(null)} type="button">Cancel</button><button className="button button-coral" type="submit">Send request</button></div></form></div>}
+    </div>
+  );
+}
+
+type Internship = { id: string; title: string; company: string; location: string; skills: string[]; applyUrl: string };
+
+function InternshipsPage({ canPost }: { canPost: boolean }) {
+  const [listings, setListings] = useState<Internship[]>(() => {
+    try {
+      const stored = localStorage.getItem("campus-connect-internships");
+      return stored ? JSON.parse(stored) : [
+        { id: "1", title: "Software Engineering Intern", company: "Northstar Labs", location: "Remote", skills: ["React", "TypeScript"], applyUrl: "https://www.linkedin.com/jobs/" },
+        { id: "2", title: "Data & AI Intern", company: "CivicWorks", location: "Hybrid · London", skills: ["Python", "Machine Learning"], applyUrl: "https://www.linkedin.com/jobs/" },
+      ];
+    } catch { return []; }
+  });
+  const [showForm, setShowForm] = useState(false);
+  const [draft, setDraft] = useState({ title: "", company: "", location: "", skills: "", applyUrl: "" });
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const next = [...listings, { id: crypto.randomUUID(), ...draft, skills: draft.skills.split(",").map((item) => item.trim()).filter(Boolean) }];
+    setListings(next);
+    localStorage.setItem("campus-connect-internships", JSON.stringify(next));
+    setShowForm(false);
+    setDraft({ title: "", company: "", location: "", skills: "", applyUrl: "" });
+  };
+  return (
+    <div className="opportunity-page">
+      <div className="marketplace-heading"><div><span className="form-kicker">CAREER LAUNCHPAD</span><h1>Internships</h1><p>Early-career opportunities shared by trusted campus partners.</p></div>{canPost && <button className="button button-coral" onClick={() => setShowForm((shown) => !shown)} type="button">{showForm ? "Close form" : "Post opportunity"}</button>}</div>
+      {showForm && <form className="create-panel compact" onSubmit={submit}><div className="field-row"><Field label="Role title"><input required value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></Field><Field label="Company"><input required value={draft.company} onChange={(e) => setDraft({ ...draft, company: e.target.value })} /></Field></div><div className="field-row"><Field label="Location"><input required value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} /></Field><Field label="Skills"><input placeholder="React, Figma" required value={draft.skills} onChange={(e) => setDraft({ ...draft, skills: e.target.value })} /></Field></div><Field label="External apply link"><input required type="url" value={draft.applyUrl} onChange={(e) => setDraft({ ...draft, applyUrl: e.target.value })} /></Field><button className="button button-dark" type="submit">Publish opportunity</button></form>}
+      <div className="internship-list">{listings.map((listing) => <article key={listing.id}><div className="company-mark">{listing.company.slice(0, 2).toUpperCase()}</div><div><span>{listing.company}</span><h2>{listing.title}</h2><p>{listing.location}</p><div className="listing-tags">{listing.skills.map((item) => <span key={item}>{item}</span>)}</div></div><a className="button button-dark" href={listing.applyUrl} rel="noreferrer" target="_blank">Apply externally <ArrowIcon /></a></article>)}</div>
+    </div>
+  );
+}
+
+function MentorsPage() {
+  const mentors = [
+    { name: "Dr. Elena Vasquez", role: "AI Researcher · University Staff", skills: ["Machine Learning", "Python"], initials: "EV" },
+    { name: "Marcus Adeyemi", role: "Product Engineer · Alumni", skills: ["React", "Career advice"], initials: "MA" },
+    { name: "Priya Nair", role: "UX Lead · Industry Mentor", skills: ["Figma", "Product design"], initials: "PN" },
+  ];
+  const [contacted, setContacted] = useState<string[]>([]);
+  return <div className="opportunity-page"><div className="marketplace-heading"><div><span className="form-kicker">LEARN FROM EXPERIENCE</span><h1>Find a mentor</h1><p>Connect with people who can offer guidance on skills, projects, and your next career step.</p></div></div><div className="mentor-grid">{mentors.map((mentor) => <article key={mentor.name}><div className="mentor-avatar">{mentor.initials}</div><h2>{mentor.name}</h2><p>{mentor.role}</p><div className="listing-tags">{mentor.skills.map((skill) => <span key={skill}>{skill}</span>)}</div><button className="button button-ghost" onClick={() => setContacted((current) => current.includes(mentor.name) ? current : [...current, mentor.name])} type="button">{contacted.includes(mentor.name) ? "Interest sent" : "Connect with mentor"}</button></article>)}</div><div className="phase-note">Full mentor matching and scheduling will become available in the teamwork and growth phase.</div></div>;
+}
+
+function CoursesPage() {
+  const courses = [
+    { id: "react-foundations", title: "React Foundations", provider: "Campus Connect Learning", level: "Beginner", skills: ["React", "TypeScript"] },
+    { id: "product-design", title: "Designing Products People Use", provider: "Open Design School", level: "Intermediate", skills: ["Figma", "Product design"] },
+    { id: "python-data", title: "Applied Python for Data", provider: "Future Skills Lab", level: "Beginner", skills: ["Python", "Data"] },
+  ];
+  const [enrolled, setEnrolled] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("campus-connect-courses") ?? "[]"); } catch { return []; }
+  });
+  const toggleEnrollment = (courseId: string) => {
+    const next = enrolled.includes(courseId) ? enrolled.filter((id) => id !== courseId) : [...enrolled, courseId];
+    setEnrolled(next);
+    localStorage.setItem("campus-connect-courses", JSON.stringify(next));
+  };
+  return <div className="opportunity-page"><div className="marketplace-heading"><div><span className="form-kicker">LEARN, THEN BUILD</span><h1>Courses</h1><p>Build a skill, then put it into practice on a real student project.</p></div></div><div className="course-grid">{courses.map((course, index) => <article key={course.title}><div className={`course-cover cover-${index + 1}`}><span>0{index + 1}</span><small>{course.level}</small></div><div><span>{course.provider}</span><h2>{course.title}</h2><div className="listing-tags">{course.skills.map((skill) => <span key={skill}>{skill}</span>)}</div><button className={enrolled.includes(course.id) ? "enrolled" : ""} onClick={() => toggleEnrollment(course.id)} type="button">{enrolled.includes(course.id) ? "Enrolled · Leave course" : "Enroll in course"} <ArrowIcon /></button></div></article>)}</div></div>;
+}
+
+function NotificationsPage({ notices, onRead }: { notices: Notice[]; onRead: () => void }) {
+  useEffect(() => onRead(), []);
+  return <div className="opportunity-page"><div className="marketplace-heading"><div><span className="form-kicker">STAY IN THE LOOP</span><h1>Notifications</h1><p>Join requests, team decisions, and opportunity updates in one place.</p></div></div><div className="notification-list">{notices.length ? notices.map((notice) => <article className={notice.read ? "" : "unread"} key={notice.id}><span className="notice-dot" /><div><h2>{notice.title}</h2><p>{notice.detail}</p><small>{new Date(notice.createdAt).toLocaleString()}</small></div></article>) : <div className="empty-feed"><span className="empty-mark">N</span><h2>You’re all caught up</h2><p>New join requests and decisions will appear here.</p></div>}</div></div>;
 }
 
 function PlaceholderPage({ view }: { view: View }) {
@@ -800,6 +1070,22 @@ export default function App() {
       return stored ? JSON.parse(stored) : null;
     } catch {
       return null;
+    }
+  });
+  const [projects, setProjects] = useState<Project[]>(() => {
+    try {
+      const stored = localStorage.getItem(PROJECTS_KEY);
+      return stored ? JSON.parse(stored) : STARTER_PROJECTS;
+    } catch {
+      return STARTER_PROJECTS;
+    }
+  });
+  const [notices, setNotices] = useState<Notice[]>(() => {
+    try {
+      const stored = localStorage.getItem(NOTIFICATIONS_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
     }
   });
   const [authenticated, setAuthenticated] = useState(() => {
@@ -855,6 +1141,32 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
+  useEffect(() => {
+    if (!authenticated) return;
+    const validateSession = () => {
+      try {
+        const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
+        const session = raw ? JSON.parse(raw) : null;
+        if (!session || session.expiresAt <= Date.now() || session.email !== account?.email) {
+          localStorage.removeItem(SESSION_KEY);
+          sessionStorage.removeItem(SESSION_KEY);
+          setAuthenticated(false);
+          setView("login");
+          window.location.hash = "login";
+        }
+      } catch {
+        localStorage.removeItem(SESSION_KEY);
+        sessionStorage.removeItem(SESSION_KEY);
+        setAuthenticated(false);
+        setView("login");
+        window.location.hash = "login";
+      }
+    };
+    validateSession();
+    const timer = window.setInterval(validateSession, 30_000);
+    return () => window.clearInterval(timer);
+  }, [authenticated, account?.email]);
+
   const navigate = (next: View) => {
     setView(next);
     window.location.hash = next === "home" ? "" : next;
@@ -909,7 +1221,37 @@ export default function App() {
   };
 
   const resetPassword = (passwordHash: string) => saveAccount({ passwordHash, resetToken: undefined, resetExpiresAt: undefined });
-  const protectedViews: View[] = ["onboarding", "dashboard", "projects", "internships", "profile", "notifications"];
+  const saveProjects = (next: Project[]) => {
+    setProjects(next);
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(next));
+  };
+  const saveNotices = (next: Notice[]) => {
+    setNotices(next);
+    localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(next));
+  };
+  const createProject = (project: Project) => saveProjects([project, ...projects]);
+  const joinProject = (projectId: string, message: string) => {
+    if (!account) return;
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    const request: JoinRequest = { id: crypto.randomUUID(), applicantEmail: account.email, applicantName: account.name, message, status: "pending" };
+    saveProjects(projects.map((item) => item.id === projectId ? { ...item, requests: [...item.requests, request] } : item));
+    saveNotices([{ id: crypto.randomUUID(), recipient: project.ownerEmail, title: `New request for ${project.title}`, detail: `${account.name} would like to join your project.`, createdAt: new Date().toISOString(), read: false }, ...notices]);
+  };
+  const decideRequest = (projectId: string, requestId: string, decision: "accepted" | "declined") => {
+    const project = projects.find((item) => item.id === projectId);
+    const request = project?.requests.find((item) => item.id === requestId);
+    if (!project || !request) return;
+    saveProjects(projects.map((item) => item.id === projectId ? {
+      ...item,
+      members: decision === "accepted" && !item.members.includes(request.applicantName) ? [...item.members, request.applicantName] : item.members,
+      requests: item.requests.map((entry) => entry.id === requestId ? { ...entry, status: decision } : entry),
+    } : item));
+    saveNotices([{ id: crypto.randomUUID(), recipient: request.applicantEmail, title: `Request ${decision}`, detail: `${project.ownerName} ${decision} your request to join ${project.title}.`, createdAt: new Date().toISOString(), read: false }, ...notices]);
+  };
+  const readNotices = () => saveNotices(notices.map((notice) => notice.recipient === account?.email ? { ...notice, read: true } : notice));
+  const visibleNotices = notices.filter((notice) => notice.recipient === account?.email);
+  const protectedViews: View[] = ["onboarding", "dashboard", "projects", "internships", "mentors", "courses", "profile", "notifications"];
   const visitorViews: View[] = ["signup", "login", "verify", "forgot", "reset"];
 
   if (protectedViews.includes(view) && (!authenticated || !account)) {
@@ -918,7 +1260,7 @@ export default function App() {
   }
   if (authenticated && account && visitorViews.includes(view)) {
     setTimeout(() => navigate("dashboard"), 0);
-    return <AppShell account={account} navigate={navigate} onLogout={logout} onSave={saveAccount} view="dashboard" />;
+    return <AppShell account={account} navigate={navigate} notices={visibleNotices} onCreateProject={createProject} onJoinProject={joinProject} onLogout={logout} onReadNotices={readNotices} onRequestDecision={decideRequest} onSave={saveAccount} projects={projects} view="dashboard" />;
   }
   if (view === "signup") return <Signup navigate={navigate} onCreated={createAccount} />;
   if (view === "login") return <Login account={account} navigate={navigate} onLogin={login} />;
@@ -926,6 +1268,6 @@ export default function App() {
   if (view === "forgot") return <ForgotPassword account={account} navigate={navigate} onRequest={requestReset} />;
   if (view === "reset") return <ResetPassword account={account} navigate={navigate} onReset={resetPassword} />;
   if (view === "onboarding" && account) return <Onboarding account={account} onSave={(changes) => { saveAccount(changes); navigate("dashboard"); }} onSkip={() => { saveAccount({ onboardingSkipped: true }); navigate("dashboard"); }} />;
-  if (protectedViews.includes(view) && account) return <AppShell account={account} navigate={navigate} onLogout={logout} onSave={saveAccount} view={view} />;
+  if (protectedViews.includes(view) && account) return <AppShell account={account} navigate={navigate} notices={visibleNotices} onCreateProject={createProject} onJoinProject={joinProject} onLogout={logout} onReadNotices={readNotices} onRequestDecision={decideRequest} onSave={saveAccount} projects={projects} view={view} />;
   return <Landing navigate={navigate} />;
 }
