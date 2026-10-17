@@ -10,9 +10,12 @@ type View =
   | "onboarding"
   | "dashboard"
   | "projects"
+  | "my-projects"
   | "internships"
   | "mentors"
   | "courses"
+  | "people"
+  | "saved"
   | "profile"
   | "notifications";
 type AccountType = "Student" | "Staff" | "Admin";
@@ -75,6 +78,13 @@ type Notice = {
   read: boolean;
 };
 
+type SavedItem = {
+  id: string;
+  type: "Project" | "Internship" | "Mentor" | "Course";
+  title: string;
+  subtitle: string;
+};
+
 const STARTER_PROJECTS: Project[] = [
   {
     id: "study-sync",
@@ -130,7 +140,7 @@ async function hashPassword(password: string) {
 
 function routeFromHash(): View {
   const route = window.location.hash.slice(1).split("?")[0] as View;
-  const routes: View[] = ["signup", "login", "verify", "forgot", "reset", "onboarding", "dashboard", "projects", "internships", "mentors", "courses", "profile", "notifications"];
+  const routes: View[] = ["signup", "login", "verify", "forgot", "reset", "onboarding", "dashboard", "projects", "my-projects", "internships", "mentors", "courses", "people", "saved", "profile", "notifications"];
   return routes.includes(route) ? route : "home";
 }
 
@@ -795,6 +805,8 @@ function AppShell({
   onJoinProject,
   onRequestDecision,
   onReadNotices,
+  savedItems,
+  onToggleSaved,
 }: {
   account: Account;
   view: View;
@@ -807,17 +819,23 @@ function AppShell({
   onJoinProject: (projectId: string, message: string) => void;
   onRequestDecision: (projectId: string, requestId: string, decision: "accepted" | "declined") => void;
   onReadNotices: () => void;
+  savedItems: SavedItem[];
+  onToggleSaved: (item: SavedItem) => void;
 }) {
   const firstName = account.name.split(" ")[0];
   const initials = account.name.split(" ").map((part) => part[0]).slice(0, 2).join("");
+  const unreadCount = notices.filter((notice) => !notice.read).length;
   const nav: { label: string; view: View }[] = [
     { label: "Dashboard", view: "dashboard" },
     { label: "Projects", view: "projects" },
+    { label: "My Projects", view: "my-projects" },
     { label: "Internships", view: "internships" },
     { label: "Mentors", view: "mentors" },
     { label: "Courses", view: "courses" },
+    { label: "People", view: "people" },
+    { label: "Saved", view: "saved" },
     { label: "Profile", view: "profile" },
-    { label: "Notifications", view: "notifications" },
+    { label: unreadCount ? `Notifications (${unreadCount})` : "Notifications", view: "notifications" },
   ];
   if (account.accountType === "Staff") nav.splice(3, 0, { label: "Talent", view: "projects" });
   if (account.accountType === "Admin") nav.splice(3, 0, { label: "Admin", view: "projects" });
@@ -834,8 +852,8 @@ function AppShell({
         <main>
           {account.onboardingSkipped && !account.onboardingComplete && <div className="profile-reminder"><span>Complete your profile to improve project matches.</span><button onClick={() => navigate("onboarding")} type="button">Finish setup</button></div>}
           {view === "profile" ? <Profile account={account} onSave={onSave} /> : view === "projects" ? (
-            <ProjectsHub account={account} onCreate={onCreateProject} onDecision={onRequestDecision} onJoin={onJoinProject} projects={projects} />
-          ) : view === "internships" ? <InternshipsPage canPost={account.accountType !== "Student"} /> : view === "mentors" ? <MentorsPage /> : view === "courses" ? <CoursesPage /> : view === "notifications" ? (
+            <ProjectsHub account={account} onCreate={onCreateProject} onDecision={onRequestDecision} onJoin={onJoinProject} onToggleSaved={onToggleSaved} projects={projects} savedItems={savedItems} />
+          ) : view === "my-projects" ? <MyProjects account={account} navigate={navigate} projects={projects} /> : view === "internships" ? <InternshipsPage canPost={account.accountType !== "Student"} onToggleSaved={onToggleSaved} savedItems={savedItems} /> : view === "mentors" ? <MentorsPage onToggleSaved={onToggleSaved} savedItems={savedItems} /> : view === "courses" ? <CoursesPage onToggleSaved={onToggleSaved} savedItems={savedItems} /> : view === "people" ? <PeoplePage account={account} /> : view === "saved" ? <SavedPage items={savedItems} onToggleSaved={onToggleSaved} /> : view === "notifications" ? (
             <NotificationsPage notices={notices} onRead={onReadNotices} />
           ) : view === "dashboard" ? (
             <>
@@ -856,12 +874,16 @@ function ProjectsHub({
   onCreate,
   onJoin,
   onDecision,
+  savedItems,
+  onToggleSaved,
 }: {
   account: Account;
   projects: Project[];
   onCreate: (project: Project) => void;
   onJoin: (projectId: string, message: string) => void;
   onDecision: (projectId: string, requestId: string, decision: "accepted" | "declined") => void;
+  savedItems: SavedItem[];
+  onToggleSaved: (item: SavedItem) => void;
 }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("All");
@@ -869,6 +891,7 @@ function ProjectsHub({
   const [skill, setSkill] = useState("All");
   const [showCreate, setShowCreate] = useState(false);
   const [joinProject, setJoinProject] = useState<Project | null>(null);
+  const [detailProjectId, setDetailProjectId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [created, setCreated] = useState({ title: "", description: "", category: "EdTech", tech: "", roles: "", teamSize: "4", status: "Open" as Project["status"] });
   const categories = ["All", ...Array.from(new Set(projects.map((project) => project.category)))];
@@ -910,6 +933,29 @@ function ProjectsHub({
     setMessage("");
   };
 
+  const detailProject = projects.find((project) => project.id === detailProjectId);
+  if (detailProject) {
+    const matched = detailProject.techStack.filter((item) => account.techStack.some((skillName) => skillName.toLowerCase() === item.toLowerCase()));
+    const missing = detailProject.techStack.filter((item) => !matched.includes(item));
+    const score = Math.round((matched.length / Math.max(detailProject.techStack.length, 1)) * 100);
+    const ownProject = detailProject.ownerEmail === account.email;
+    const request = detailProject.requests.find((item) => item.applicantEmail === account.email);
+    return (
+      <div className="project-detail">
+        <button className="detail-back" onClick={() => setDetailProjectId(null)} type="button">← Back to projects</button>
+        <div className="detail-hero">
+          <div><span className={`status-badge ${detailProject.status.toLowerCase().replace(" ", "-")}`}>{detailProject.status}</span><span className="detail-category">{detailProject.category}</span><h1>{detailProject.title}</h1><p>{detailProject.description}</p><div className="listing-tags">{detailProject.techStack.map((item) => <span key={item}>{item}</span>)}</div></div>
+          <div className="detail-actions"><button aria-label="Save project" className={`save-button ${savedItems.some((item) => item.id === detailProject.id) ? "saved" : ""}`} onClick={() => onToggleSaved({ id: detailProject.id, type: "Project", title: detailProject.title, subtitle: detailProject.category })} type="button">Save</button>{!ownProject && !request && <button className="button button-coral" onClick={() => setJoinProject(detailProject)} type="button">Request to join</button>}{request && <span className={`request-state ${request.status}`}>Request {request.status}</span>}</div>
+        </div>
+        <div className="detail-layout">
+          <section><span className="form-kicker">PROJECT BRIEF</span><h2>What the team is building</h2><p>{detailProject.description} The team is looking for thoughtful collaborators who enjoy learning in public, sharing feedback, and turning early ideas into a useful working product.</p><h3>Roles currently needed</h3><div className="role-cards">{detailProject.roles.map((role) => <div key={role}><span>{role.slice(0, 1)}</span><strong>{role}</strong><small>Open role</small></div>)}</div><h3>Current team</h3><div className="team-row">{detailProject.members.map((member) => <span key={member}><b>{member.split(" ").map((part) => part[0]).slice(0, 2).join("")}</b>{member}</span>)}</div></section>
+          <aside className="match-card"><span className="form-kicker">YOUR MATCH</span><strong>{score}%</strong><h3>{score >= 65 ? "Strong skill match" : "Room to grow"}</h3><p>{matched.length ? `You already bring ${matched.join(", ")}.` : "Add more skills to your profile to improve this match."}</p>{missing.length > 0 && <div><small>SKILLS TO LEARN</small>{missing.map((item) => <span key={item}>{item}</span>)}</div>}<button onClick={() => setDetailProjectId(null)} type="button">Find related projects</button></aside>
+        </div>
+        {joinProject && <div className="dialog-backdrop" onMouseDown={() => setJoinProject(null)}><form className="join-dialog" onMouseDown={(e) => e.stopPropagation()} onSubmit={submitJoin}><span className="form-kicker">JOIN {joinProject.title.toUpperCase()}</span><h2>Tell the team why you’d like to help.</h2><Field label="Short message"><textarea autoFocus onChange={(e) => setMessage(e.target.value)} placeholder="Introduce yourself and share how your skills could contribute..." required value={message} /></Field><div><button className="text-button" onClick={() => setJoinProject(null)} type="button">Cancel</button><button className="button button-coral" type="submit">Send request</button></div></form></div>}
+      </div>
+    );
+  }
+
   return (
     <div className="projects-page">
       <div className="marketplace-heading">
@@ -943,8 +989,8 @@ function ProjectsHub({
           const existingRequest = project.requests.find((request) => request.applicantEmail === account.email);
           return (
             <article className="project-listing" key={project.id}>
-              <div className="listing-top"><span className={`status-badge ${project.status.toLowerCase().replace(" ", "-")}`}>{project.status}</span><span>{project.category}</span></div>
-              <h2>{project.title}</h2>
+              <div className="listing-top"><span className={`status-badge ${project.status.toLowerCase().replace(" ", "-")}`}>{project.status}</span><button aria-label={`Save ${project.title}`} className={`card-save ${savedItems.some((item) => item.id === project.id) ? "saved" : ""}`} onClick={() => onToggleSaved({ id: project.id, type: "Project", title: project.title, subtitle: project.category })} type="button">{savedItems.some((item) => item.id === project.id) ? "Saved" : "Save"}</button></div>
+              <button className="listing-title" onClick={() => setDetailProjectId(project.id)} type="button">{project.title}</button>
               <p>{project.description}</p>
               {matched.length > 0 && <div className="skill-match"><Icon size={14}><path d="m12 3 1.2 3.7a2 2 0 0 0 1.3 1.3l3.7 1.2-3.7 1.3a2 2 0 0 0-1.3 1.2L12 15.5l-1.2-3.8a2 2 0 0 0-1.3-1.2L5.7 9.2 9.5 8a2 2 0 0 0 1.3-1.3L12 3Z" fill="currentColor" /></Icon>Matches {matched.join(" + ")}</div>}
               <div className="listing-tags">{project.techStack.map((item) => <span key={item}>{item}</span>)}</div>
@@ -962,7 +1008,7 @@ function ProjectsHub({
 
 type Internship = { id: string; title: string; company: string; location: string; skills: string[]; applyUrl: string };
 
-function InternshipsPage({ canPost }: { canPost: boolean }) {
+function InternshipsPage({ canPost, savedItems, onToggleSaved }: { canPost: boolean; savedItems: SavedItem[]; onToggleSaved: (item: SavedItem) => void }) {
   const [listings, setListings] = useState<Internship[]>(() => {
     try {
       const stored = localStorage.getItem("campus-connect-internships");
@@ -986,22 +1032,22 @@ function InternshipsPage({ canPost }: { canPost: boolean }) {
     <div className="opportunity-page">
       <div className="marketplace-heading"><div><span className="form-kicker">CAREER LAUNCHPAD</span><h1>Internships</h1><p>Early-career opportunities shared by trusted campus partners.</p></div>{canPost && <button className="button button-coral" onClick={() => setShowForm((shown) => !shown)} type="button">{showForm ? "Close form" : "Post opportunity"}</button>}</div>
       {showForm && <form className="create-panel compact" onSubmit={submit}><div className="field-row"><Field label="Role title"><input required value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></Field><Field label="Company"><input required value={draft.company} onChange={(e) => setDraft({ ...draft, company: e.target.value })} /></Field></div><div className="field-row"><Field label="Location"><input required value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} /></Field><Field label="Skills"><input placeholder="React, Figma" required value={draft.skills} onChange={(e) => setDraft({ ...draft, skills: e.target.value })} /></Field></div><Field label="External apply link"><input required type="url" value={draft.applyUrl} onChange={(e) => setDraft({ ...draft, applyUrl: e.target.value })} /></Field><button className="button button-dark" type="submit">Publish opportunity</button></form>}
-      <div className="internship-list">{listings.map((listing) => <article key={listing.id}><div className="company-mark">{listing.company.slice(0, 2).toUpperCase()}</div><div><span>{listing.company}</span><h2>{listing.title}</h2><p>{listing.location}</p><div className="listing-tags">{listing.skills.map((item) => <span key={item}>{item}</span>)}</div></div><a className="button button-dark" href={listing.applyUrl} rel="noreferrer" target="_blank">Apply externally <ArrowIcon /></a></article>)}</div>
+      <div className="internship-list">{listings.map((listing) => <article key={listing.id}><div className="company-mark">{listing.company.slice(0, 2).toUpperCase()}</div><div><span>{listing.company}</span><h2>{listing.title}</h2><p>{listing.location}</p><div className="listing-tags">{listing.skills.map((item) => <span key={item}>{item}</span>)}</div></div><div className="internship-actions"><button className={`save-button ${savedItems.some((item) => item.id === listing.id) ? "saved" : ""}`} onClick={() => onToggleSaved({ id: listing.id, type: "Internship", title: listing.title, subtitle: listing.company })} type="button">Save</button><a className="button button-dark" href={listing.applyUrl} rel="noreferrer" target="_blank">Apply externally <ArrowIcon /></a></div></article>)}</div>
     </div>
   );
 }
 
-function MentorsPage() {
+function MentorsPage({ savedItems, onToggleSaved }: { savedItems: SavedItem[]; onToggleSaved: (item: SavedItem) => void }) {
   const mentors = [
     { name: "Dr. Elena Vasquez", role: "AI Researcher · University Staff", skills: ["Machine Learning", "Python"], initials: "EV" },
     { name: "Marcus Adeyemi", role: "Product Engineer · Alumni", skills: ["React", "Career advice"], initials: "MA" },
     { name: "Priya Nair", role: "UX Lead · Industry Mentor", skills: ["Figma", "Product design"], initials: "PN" },
   ];
   const [contacted, setContacted] = useState<string[]>([]);
-  return <div className="opportunity-page"><div className="marketplace-heading"><div><span className="form-kicker">LEARN FROM EXPERIENCE</span><h1>Find a mentor</h1><p>Connect with people who can offer guidance on skills, projects, and your next career step.</p></div></div><div className="mentor-grid">{mentors.map((mentor) => <article key={mentor.name}><div className="mentor-avatar">{mentor.initials}</div><h2>{mentor.name}</h2><p>{mentor.role}</p><div className="listing-tags">{mentor.skills.map((skill) => <span key={skill}>{skill}</span>)}</div><button className="button button-ghost" onClick={() => setContacted((current) => current.includes(mentor.name) ? current : [...current, mentor.name])} type="button">{contacted.includes(mentor.name) ? "Interest sent" : "Connect with mentor"}</button></article>)}</div><div className="phase-note">Full mentor matching and scheduling will become available in the teamwork and growth phase.</div></div>;
+  return <div className="opportunity-page"><div className="marketplace-heading"><div><span className="form-kicker">LEARN FROM EXPERIENCE</span><h1>Find a mentor</h1><p>Connect with people who can offer guidance on skills, projects, and your next career step.</p></div></div><div className="mentor-grid">{mentors.map((mentor) => <article key={mentor.name}><button className={`card-save ${savedItems.some((item) => item.id === mentor.name) ? "saved" : ""}`} onClick={() => onToggleSaved({ id: mentor.name, type: "Mentor", title: mentor.name, subtitle: mentor.role })} type="button">Save</button><div className="mentor-avatar">{mentor.initials}</div><h2>{mentor.name}</h2><p>{mentor.role}</p><div className="listing-tags">{mentor.skills.map((skill) => <span key={skill}>{skill}</span>)}</div><button className="button button-ghost" onClick={() => setContacted((current) => current.includes(mentor.name) ? current : [...current, mentor.name])} type="button">{contacted.includes(mentor.name) ? "Interest sent" : "Connect with mentor"}</button></article>)}</div><div className="phase-note">Full mentor matching and scheduling will become available in the teamwork and growth phase.</div></div>;
 }
 
-function CoursesPage() {
+function CoursesPage({ savedItems, onToggleSaved }: { savedItems: SavedItem[]; onToggleSaved: (item: SavedItem) => void }) {
   const courses = [
     { id: "react-foundations", title: "React Foundations", provider: "Campus Connect Learning", level: "Beginner", skills: ["React", "TypeScript"] },
     { id: "product-design", title: "Designing Products People Use", provider: "Open Design School", level: "Intermediate", skills: ["Figma", "Product design"] },
@@ -1015,7 +1061,37 @@ function CoursesPage() {
     setEnrolled(next);
     localStorage.setItem("campus-connect-courses", JSON.stringify(next));
   };
-  return <div className="opportunity-page"><div className="marketplace-heading"><div><span className="form-kicker">LEARN, THEN BUILD</span><h1>Courses</h1><p>Build a skill, then put it into practice on a real student project.</p></div></div><div className="course-grid">{courses.map((course, index) => <article key={course.title}><div className={`course-cover cover-${index + 1}`}><span>0{index + 1}</span><small>{course.level}</small></div><div><span>{course.provider}</span><h2>{course.title}</h2><div className="listing-tags">{course.skills.map((skill) => <span key={skill}>{skill}</span>)}</div><button className={enrolled.includes(course.id) ? "enrolled" : ""} onClick={() => toggleEnrollment(course.id)} type="button">{enrolled.includes(course.id) ? "Enrolled · Leave course" : "Enroll in course"} <ArrowIcon /></button></div></article>)}</div></div>;
+  return <div className="opportunity-page"><div className="marketplace-heading"><div><span className="form-kicker">LEARN, THEN BUILD</span><h1>Courses</h1><p>Build a skill, then put it into practice on a real student project.</p></div></div><div className="course-grid">{courses.map((course, index) => <article key={course.title}><button className={`card-save course-save ${savedItems.some((item) => item.id === course.id) ? "saved" : ""}`} onClick={() => onToggleSaved({ id: course.id, type: "Course", title: course.title, subtitle: course.provider })} type="button">Save</button><div className={`course-cover cover-${index + 1}`}><span>0{index + 1}</span><small>{course.level}</small></div><div><span>{course.provider}</span><h2>{course.title}</h2><div className="listing-tags">{course.skills.map((skill) => <span key={skill}>{skill}</span>)}</div><button className={enrolled.includes(course.id) ? "enrolled" : ""} onClick={() => toggleEnrollment(course.id)} type="button">{enrolled.includes(course.id) ? "Enrolled · Leave course" : "Enroll in course"} <ArrowIcon /></button></div></article>)}</div></div>;
+}
+
+function MyProjects({ account, projects, navigate }: { account: Account; projects: Project[]; navigate: (view: View) => void }) {
+  const owned = projects.filter((project) => project.ownerEmail === account.email);
+  const joined = projects.filter((project) => project.members.includes(account.name) && project.ownerEmail !== account.email);
+  const requested = projects.filter((project) => project.requests.some((request) => request.applicantEmail === account.email && request.status === "pending"));
+  const groups: { title: string; detail: string; items: Project[] }[] = [
+    { title: "Projects I own", detail: "Ideas you started and teams you manage.", items: owned },
+    { title: "Teams I joined", detail: "Projects where you are an accepted team member.", items: joined },
+    { title: "Pending requests", detail: "Teams you are waiting to hear back from.", items: requested },
+  ];
+  return <div className="my-projects-page"><div className="marketplace-heading"><div><span className="form-kicker">YOUR WORK</span><h1>My Projects</h1><p>Everything you’re building and every team you’re connecting with.</p></div><button className="button button-coral" onClick={() => navigate("projects")} type="button">Find more projects</button></div><div className="project-summary"><div><strong>{owned.length}</strong><span>Owned</span></div><div><strong>{joined.length}</strong><span>Joined</span></div><div><strong>{requested.length}</strong><span>Pending</span></div></div>{groups.map((group) => <section className="project-group" key={group.title}><div><h2>{group.title}</h2><p>{group.detail}</p></div>{group.items.length ? <div className="mini-project-grid">{group.items.map((project) => <article key={project.id}><span className={`status-badge ${project.status.toLowerCase().replace(" ", "-")}`}>{project.status}</span><h3>{project.title}</h3><p>{project.category} · {project.members.length}/{project.teamSize} members</p><div className="listing-tags">{project.techStack.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>)}</div></article>)}</div> : <div className="group-empty">No projects in this section yet.</div>}</section>)}</div>;
+}
+
+function SavedPage({ items, onToggleSaved }: { items: SavedItem[]; onToggleSaved: (item: SavedItem) => void }) {
+  const [filter, setFilter] = useState("All");
+  const filtered = filter === "All" ? items : items.filter((item) => item.type === filter);
+  return <div className="saved-page"><div className="marketplace-heading"><div><span className="form-kicker">YOUR SHORTLIST</span><h1>Saved opportunities</h1><p>Projects, people, learning, and roles you want to revisit.</p></div></div><div className="saved-filters">{["All", "Project", "Internship", "Mentor", "Course"].map((type) => <button className={filter === type ? "active" : ""} key={type} onClick={() => setFilter(type)} type="button">{type}</button>)}</div>{filtered.length ? <div className="saved-grid">{filtered.map((item) => <article key={`${item.type}-${item.id}`}><span>{item.type}</span><h2>{item.title}</h2><p>{item.subtitle}</p><button onClick={() => onToggleSaved(item)} type="button">Remove from saved</button></article>)}</div> : <div className="empty-feed"><span className="empty-mark">S</span><h2>Nothing saved here yet</h2><p>Save opportunities while browsing and they’ll appear here.</p></div>}</div>;
+}
+
+function PeoplePage({ account }: { account: Account }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const people = [
+    { name: "Maya Chen", role: "Student", university: "National University of Singapore", bio: "Frontend developer exploring tools that make learning more collaborative.", skills: ["React", "TypeScript", "Figma"], availability: "6–10 hours / week", projects: 3 },
+    { name: "Samuel Okoro", role: "Student", university: "University of Lagos", bio: "Backend developer interested in climate technology and open-source communities.", skills: ["Python", "Node.js", "Machine Learning"], availability: "10+ hours / week", projects: 2 },
+    { name: "Nora James", role: "Staff", university: "University of Edinburgh", bio: "Supporting emerging technologists with product strategy and research mentorship.", skills: ["Product design", "Figma", "Career advice"], availability: "1–5 hours / week", projects: 5 },
+  ];
+  const person = people.find((item) => item.name === selected);
+  if (person) return <div className="public-profile"><button className="detail-back" onClick={() => setSelected(null)} type="button">← Back to people</button><div className="public-profile-hero"><div className="large-avatar">{person.name.split(" ").map((part) => part[0]).join("")}</div><div><span>{person.role} · {person.university}</span><h1>{person.name}</h1><p>{person.bio}</p></div><button className="button button-coral" type="button">Invite to project</button></div><div className="public-profile-grid"><section><span className="form-kicker">SKILLS & INTERESTS</span><div className="profile-skills">{person.skills.map((skill) => <span className={account.techStack.includes(skill) ? "match" : ""} key={skill}>{skill}</span>)}</div></section><section><span className="form-kicker">COLLABORATION</span><strong>{person.availability}</strong><p>Current availability</p></section><section><span className="form-kicker">PROJECTS</span><strong>{person.projects}</strong><p>Projects contributed to</p></section></div></div>;
+  return <div className="people-page"><div className="marketplace-heading"><div><span className="form-kicker">MEET YOUR COMMUNITY</span><h1>Student builders</h1><p>Find collaborators with complementary skills and shared interests.</p></div></div><div className="people-grid">{people.map((person) => { const overlap = person.skills.filter((skill) => account.techStack.includes(skill)); return <article key={person.name}><div className="mentor-avatar">{person.name.split(" ").map((part) => part[0]).join("")}</div><span>{person.role} · {person.university}</span><h2>{person.name}</h2><p>{person.bio}</p>{overlap.length > 0 && <div className="skill-match">{overlap.length} shared skill{overlap.length > 1 ? "s" : ""}</div>}<div className="listing-tags">{person.skills.map((skill) => <span key={skill}>{skill}</span>)}</div><button className="button button-ghost" onClick={() => setSelected(person.name)} type="button">View profile</button></article>; })}</div></div>;
 }
 
 function NotificationsPage({ notices, onRead }: { notices: Notice[]; onRead: () => void }) {
@@ -1084,6 +1160,13 @@ export default function App() {
     try {
       const stored = localStorage.getItem(NOTIFICATIONS_KEY);
       return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [savedItems, setSavedItems] = useState<SavedItem[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("campus-connect-saved") ?? "[]");
     } catch {
       return [];
     }
@@ -1251,7 +1334,13 @@ export default function App() {
   };
   const readNotices = () => saveNotices(notices.map((notice) => notice.recipient === account?.email ? { ...notice, read: true } : notice));
   const visibleNotices = notices.filter((notice) => notice.recipient === account?.email);
-  const protectedViews: View[] = ["onboarding", "dashboard", "projects", "internships", "mentors", "courses", "profile", "notifications"];
+  const toggleSaved = (item: SavedItem) => {
+    const exists = savedItems.some((saved) => saved.id === item.id && saved.type === item.type);
+    const next = exists ? savedItems.filter((saved) => saved.id !== item.id || saved.type !== item.type) : [item, ...savedItems];
+    setSavedItems(next);
+    localStorage.setItem("campus-connect-saved", JSON.stringify(next));
+  };
+  const protectedViews: View[] = ["onboarding", "dashboard", "projects", "my-projects", "internships", "mentors", "courses", "people", "saved", "profile", "notifications"];
   const visitorViews: View[] = ["signup", "login", "verify", "forgot", "reset"];
 
   if (protectedViews.includes(view) && (!authenticated || !account)) {
@@ -1260,7 +1349,7 @@ export default function App() {
   }
   if (authenticated && account && visitorViews.includes(view)) {
     setTimeout(() => navigate("dashboard"), 0);
-    return <AppShell account={account} navigate={navigate} notices={visibleNotices} onCreateProject={createProject} onJoinProject={joinProject} onLogout={logout} onReadNotices={readNotices} onRequestDecision={decideRequest} onSave={saveAccount} projects={projects} view="dashboard" />;
+    return <AppShell account={account} navigate={navigate} notices={visibleNotices} onCreateProject={createProject} onJoinProject={joinProject} onLogout={logout} onReadNotices={readNotices} onRequestDecision={decideRequest} onSave={saveAccount} onToggleSaved={toggleSaved} projects={projects} savedItems={savedItems} view="dashboard" />;
   }
   if (view === "signup") return <Signup navigate={navigate} onCreated={createAccount} />;
   if (view === "login") return <Login account={account} navigate={navigate} onLogin={login} />;
@@ -1268,6 +1357,6 @@ export default function App() {
   if (view === "forgot") return <ForgotPassword account={account} navigate={navigate} onRequest={requestReset} />;
   if (view === "reset") return <ResetPassword account={account} navigate={navigate} onReset={resetPassword} />;
   if (view === "onboarding" && account) return <Onboarding account={account} onSave={(changes) => { saveAccount(changes); navigate("dashboard"); }} onSkip={() => { saveAccount({ onboardingSkipped: true }); navigate("dashboard"); }} />;
-  if (protectedViews.includes(view) && account) return <AppShell account={account} navigate={navigate} notices={visibleNotices} onCreateProject={createProject} onJoinProject={joinProject} onLogout={logout} onReadNotices={readNotices} onRequestDecision={decideRequest} onSave={saveAccount} projects={projects} view={view} />;
+  if (protectedViews.includes(view) && account) return <AppShell account={account} navigate={navigate} notices={visibleNotices} onCreateProject={createProject} onJoinProject={joinProject} onLogout={logout} onReadNotices={readNotices} onRequestDecision={decideRequest} onSave={saveAccount} onToggleSaved={toggleSaved} projects={projects} savedItems={savedItems} view={view} />;
   return <Landing navigate={navigate} />;
 }
